@@ -1,0 +1,168 @@
+{
+  "actorSpecification": 1,
+  "fields": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "type": "object",
+    "properties": {
+      "id": {
+        "title": "Game ID",
+        "type": "integer",
+        "description": "RAWG internal game identifier"
+      },
+      "slug": {
+        "title": "Slug",
+        "type": "string",
+        "description": "URL-friendly unique game identifier"
+      },
+      "name": {
+        "title": "Game Name",
+        "type": "string",
+        "description": "Official title of the game"
+      },
+      "url": {
+        "title": "RAWG URL",
+        "type": "string",
+        "description": "Link to the game page on RAWG"
+      },
+      "released": {
+        "title": "Release Date",
+        "type": "string",
+        "description": "Official release date (YYYY-MM-DD)"
+      },
+      "rating": {
+        "title": "Rating",
+        "type": "number",
+        "description": "Average user rating on RAWG (0–5 scale)"
+      },
+      "rating_top": {
+        "title": "Rating Top",
+        "type": "integer",
+        "description": "Maximum rating score for this game"
+      },
+      "ratings_count": {
+        "title": "Ratings Count",
+        "type": "integer",
+        "description": "Total number of user ratings"
+      },
+      "reviews_count": {
+        "title": "Reviews Count",
+        "type": "integer",
+        "description": "Total number of user reviews"
+      },
+      "metacritic": {
+        "title": "Metacritic Score",
+        "type": "integer",
+        "description": "Metacritic aggregate score (0–100)"
+      },
+      "background_image": {
+        "title": "Cover Image",
+        "type": "string",
+        "description": "URL to the game's main promotional image"
+      },
+      "genres": {
+        "title": "Genres",
+        "type": "string",
+        "description": "Comma-separated list of genres"
+      },
+      "platforms": {
+        "title": "Platforms",
+        "type": "string",
+        "description": "Comma-separated list of platforms the game is available on"
+      },
+      "stores": {
+        "title": "Stores",
+        "type": "string",
+        "description": "Comma-separated list of stores selling the game"
+      },
+      "tags": {
+        "title": "Tags",
+        "type": "string",
+        "description": "Top 5 tags associated with the game"
+      },
+      "esrb_rating": {
+        "title": "ESRB Rating",
+        "type": "string",
+        "description": "ESRB age rating (e.g. Everyone, Teen, Mature)"
+      },
+      "playtime_hours": {
+        "title": "Average Playtime (hours)",
+        "type": "integer",
+        "description": "Average playtime in hours reported by players"
+      },
+      "added": {
+        "title": "Added to Libraries",
+        "type": "integer",
+        "description": "Number of users who added this game to their library"
+      },
+      "clip_url": {
+        "title": "Clip URL",
+        "type": "string",
+        "description": "URL to a gameplay clip/trailer if available"
+      }
+    }
+  },
+  "views": {
+    "overview": {
+      "title": "Overview",
+      "transformation": {
+        "fields": [
+          "name",
+          "released",
+          "rating",
+          "metacritic",
+          "genres",
+          "platforms",
+          "playtime_hours",
+          "esrb_rating",
+          "url",
+          "background_image"
+        ]
+      },
+      "display": {
+        "component": "table",
+        "properties": {
+          "name": {
+            "label": "Game Name",
+            "format": "text"
+          },
+          "released": {
+            "label": "Released",
+            "format": "text"
+          },
+          "rating": {
+            "label": "Rating",
+            "format": "number"
+          },
+          "metacritic": {
+            "label": "Metacritic",
+            "format": "number"
+          },
+          "genres": {
+            "label": "Genres",
+            "format": "text"
+          },
+          "platforms": {
+            "label": "Platforms",
+            "format": "text"
+          },
+          "playtime_hours": {
+            "label": "Avg. Playtime (h)",
+            "format": "number"
+          },
+          "esrb_rating": {
+            "label": "ESRB",
+            "format": "text"
+          },
+          "url": {
+            "label": "RAWG URL",
+            "format": "link"
+          },
+          "background_image": {
+            "label": "Cover",
+            "format": "image"
+          }
+        }
+      }
+    }
+  }
+}
