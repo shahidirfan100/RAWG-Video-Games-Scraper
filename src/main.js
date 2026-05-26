@@ -2,7 +2,7 @@
 // Uses Playwright Firefox to capture the RAWG site API key, then fetches
 // all game data via fast direct HTTP calls — no user API key required.
 import { Actor, log } from 'apify';
-import { Dataset, PlaywrightCrawler } from 'crawlee';
+import { Dataset } from 'crawlee';
 import { gotScraping } from 'got-scraping';
 import playwright from 'playwright';
 
@@ -62,11 +62,6 @@ async function main() {
             ? await Actor.createProxyConfiguration({ ...proxyConfiguration })
             : undefined;
 
-        // ── PHASE 1: CAPTURE API KEY VIA PLAYWRIGHT ──────────────────────────
-        // rawg.io's own frontend embeds their API key and uses it for every
-        // XHR call to api.rawg.io. We intercept that key from a browser visit.
-        log.info('Launching browser to capture RAWG API key from network traffic...');
-
         let capturedApiKey = null;
         const USER_AGENTS = [
             'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:127.0) Gecko/20100101 Firefox/127.0',
@@ -75,93 +70,83 @@ async function main() {
         ];
         const userAgent = USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)];
 
-        const keyCrawler = new PlaywrightCrawler({
-            launchContext: {
-                launcher: playwright.firefox,
-                launchOptions: { headless: true },
-                userAgent,
-            },
-            proxyConfiguration: proxyConf,
-            maxConcurrency: 1,
-            maxRequestRetries: 2,
-            navigationTimeoutSecs: 30,
-            requestHandlerTimeoutSecs: 30,
+        // ── PHASE 1: CAPTURE API KEY VIA PLAYWRIGHT (FAST PATH) ─────────────
+        // rawg.io's own frontend embeds their API key and uses it for every
+        // XHR call to api.rawg.io. We intercept that key from a browser visit.
+        if (!capturedApiKey) {
+            log.info('Launching lightweight browser to capture RAWG API key...');
 
-            preNavigationHooks: [
-                async ({ page }) => {
-                    // Block images, media, fonts, stylesheets for speed
-                    await page.route('**/*', (route) => {
-                        const type = route.request().resourceType();
-                        const url = route.request().url();
-                        if (
-                            ['image', 'font', 'media', 'stylesheet'].includes(type) ||
-                            url.includes('google-analytics') ||
-                            url.includes('googletagmanager') ||
-                            url.includes('facebook') ||
-                            url.includes('doubleclick')
-                        ) {
-                            return route.abort();
-                        }
-                        return route.continue();
-                    });
+            const proxyUrl = proxyConf ? await proxyConf.newUrl?.() : undefined;
+            const launchOptions = { headless: true };
+            const browser = await playwright.firefox.launch(launchOptions);
 
-                    // Intercept outgoing requests to api.rawg.io/rawg.io and extract key
-                    page.on('request', (request) => {
-                        const url = request.url();
-                        if ((url.includes('api.rawg.io/api/') || url.includes('rawg.io/api/')) && !capturedApiKey) {
-                            try {
-                                const parsed = new URL(url);
-                                const k = parsed.searchParams.get('key');
-                                if (k && k.length > 5) {
-                                    capturedApiKey = k;
-                                    log.info(`API key captured from network traffic`);
-                                }
-                            } catch {
-                                // ignore URL parse errors
-                            }
-                        }
-                    });
-                },
-            ],
+            try {
+                const contextOptions = {
+                    userAgent,
+                    viewport: { width: 1366, height: 768 },
+                };
+                if (proxyUrl) {
+                    const parsedProxy = new URL(proxyUrl);
+                    contextOptions.proxy = {
+                        server: `${parsedProxy.protocol}//${parsedProxy.host}`,
+                        username: parsedProxy.username || undefined,
+                        password: parsedProxy.password || undefined,
+                    };
+                }
 
-            async requestHandler({ page }) {
-                try {
-                    const title = await page.title();
-                    log.info(`Page title: "${title}"`);
-                    const content = await page.content();
-                    log.info(`Page content length: ${content.length}`);
-                    if (content.includes('Cloudflare') || content.includes('Just a moment') || content.includes('Verify you are human')) {
-                        log.warning('Cloudflare/Bot detection page detected!');
+                const context = await browser.newContext(contextOptions);
+                const page = await context.newPage();
+
+                await page.route('**/*', (route) => {
+                    const type = route.request().resourceType();
+                    const url = route.request().url();
+                    if (
+                        ['image', 'font', 'media', 'stylesheet'].includes(type) ||
+                        url.includes('google-analytics') ||
+                        url.includes('googletagmanager') ||
+                        url.includes('facebook') ||
+                        url.includes('doubleclick')
+                    ) {
+                        return route.abort();
                     }
-                } catch (e) {
-                    log.error(`Failed to get page diagnostics: ${e.message}`);
-                }
+                    return route.continue();
+                });
 
-                // Wait a moment for XHR requests to fire
-                await page.waitForTimeout(4000);
+                const keyPromise = new Promise((resolve) => {
+                    const timer = setTimeout(() => resolve(null), 10_000);
 
-                // If key not captured yet, wait longer
-                if (!capturedApiKey) {
-                    await page.waitForTimeout(3000);
-                }
+                    page.on('request', (request) => {
+                    const reqUrl = request.url();
+                    if ((reqUrl.includes('api.rawg.io/api/') || reqUrl.includes('rawg.io/api/')) && !capturedApiKey) {
+                        try {
+                            const parsed = new URL(reqUrl);
+                            const k = parsed.searchParams.get('key');
+                            if (k && k.length > 5) {
+                                capturedApiKey = k;
+                                log.info('API key captured from browser network traffic');
+                                clearTimeout(timer);
+                                resolve(k);
+                            }
+                        } catch {
+                            // ignore URL parse errors
+                        }
+                    }
+                });
+                });
 
-                if (!capturedApiKey) {
-                    log.warning('API key not yet captured — page may not have loaded API calls');
-                }
-            },
+                const captureUrl =
+                    resolvedSearch
+                        ? `https://rawg.io/games?search=${encodeURIComponent(resolvedSearch)}`
+                        : 'https://rawg.io/games';
 
-            failedRequestHandler({ request }, error) {
-                log.error(`Browser key-capture failed for ${request.url}: ${error.message}`);
-            },
-        });
-
-        // Visit rawg.io games page which always triggers API XHR calls
-        const captureUrl =
-            resolvedSearch
-                ? `https://rawg.io/games?search=${encodeURIComponent(resolvedSearch)}`
-                : 'https://rawg.io/games';
-
-        await keyCrawler.run([{ url: captureUrl }]);
+                await page.goto(captureUrl, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+                await keyPromise;
+            } catch (err) {
+                log.error(`Browser key-capture failed: ${err.message}`);
+            } finally {
+                await browser.close();
+            }
+        }
 
         if (!capturedApiKey) {
             log.error(
@@ -175,7 +160,7 @@ async function main() {
         log.info('API key captured. Starting data collection via API...');
 
         // ── PHASE 2: FETCH DATA VIA DIRECT API CALLS (gotScraping) ──────────
-        const PAGE_SIZE = 20;
+        const PAGE_SIZE = 40;
 
         function buildApiUrl(page) {
             const u = new URL('https://api.rawg.io/api/games');
@@ -231,6 +216,20 @@ async function main() {
          * Map a raw RAWG game object to a clean dataset record.
          * Only fields with actual values are included — no null pollution.
          */
+        function uniqueTextValues(values) {
+            const normalizedToOriginal = new Map();
+            for (const value of values) {
+                if (!value) continue;
+                const cleaned = String(value).trim();
+                if (!cleaned) continue;
+                const normalized = cleaned.toLowerCase();
+                if (!normalizedToOriginal.has(normalized)) {
+                    normalizedToOriginal.set(normalized, cleaned);
+                }
+            }
+            return [...normalizedToOriginal.values()];
+        }
+
         function mapGame(game) {
             const item = {};
 
@@ -250,25 +249,20 @@ async function main() {
             if (game.background_image) item.background_image = game.background_image;
 
             if (Array.isArray(game.genres) && game.genres.length > 0) {
-                item.genres = game.genres.map((g) => g.name).join(', ');
+                const genres = uniqueTextValues(game.genres.map((g) => g?.name));
+                if (genres.length > 0) item.genres = genres.join(', ');
             }
             if (Array.isArray(game.platforms) && game.platforms.length > 0) {
-                item.platforms = game.platforms
-                    .map((p) => p.platform?.name)
-                    .filter(Boolean)
-                    .join(', ');
+                const platforms = uniqueTextValues(game.platforms.map((p) => p.platform?.name));
+                if (platforms.length > 0) item.platforms = platforms.join(', ');
             }
             if (Array.isArray(game.stores) && game.stores.length > 0) {
-                item.stores = game.stores
-                    .map((s) => s.store?.name)
-                    .filter(Boolean)
-                    .join(', ');
+                const stores = uniqueTextValues(game.stores.map((s) => s.store?.name));
+                if (stores.length > 0) item.stores = stores.join(', ');
             }
             if (Array.isArray(game.tags) && game.tags.length > 0) {
-                item.tags = game.tags
-                    .slice(0, 5)
-                    .map((t) => t.name)
-                    .join(', ');
+                const tags = uniqueTextValues(game.tags.map((t) => t?.name)).slice(0, 5);
+                if (tags.length > 0) item.tags = tags.join(', ');
             }
             if (game.esrb_rating?.name) item.esrb_rating = game.esrb_rating.name;
             if (game.playtime != null && game.playtime !== 0) item.playtime_hours = game.playtime;
@@ -303,6 +297,7 @@ async function main() {
 
             log.info(`Page ${page}: ${results.length} games (API total: ${pageData.count ?? '?'})`);
 
+            const pageItems = [];
             for (const game of results) {
                 if (saved >= RESULTS_WANTED) break;
 
@@ -313,8 +308,12 @@ async function main() {
                 const mapped = mapGame(game);
                 if (!mapped.name) continue;
 
-                await Dataset.pushData(mapped);
+                pageItems.push(mapped);
                 saved++;
+            }
+
+            if (pageItems.length > 0) {
+                await Dataset.pushData(pageItems);
             }
 
             log.info(`Saved ${saved} / ${RESULTS_WANTED} games`);
@@ -323,9 +322,7 @@ async function main() {
                 log.info('No next page from RAWG API — done.');
                 break;
             }
-
             page++;
-            await new Promise((resolve) => { setTimeout(resolve, 300); });
         }
 
         log.info(`Finished. Total saved: ${saved} games.`);

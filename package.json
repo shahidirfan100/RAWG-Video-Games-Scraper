@@ -6,7 +6,6 @@
   "main": "src/main.js",
   "scripts": {
     "start": "node src/main.js",
-    "postinstall": "node -e \"if (!process.env.PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD) { console.log('Installing Playwright Firefox...'); require('child_process').execSync('npx playwright install firefox', {stdio: 'inherit'}); } else { console.log('Skipping Playwright browser install because PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD is set'); }\"",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "eslint",
